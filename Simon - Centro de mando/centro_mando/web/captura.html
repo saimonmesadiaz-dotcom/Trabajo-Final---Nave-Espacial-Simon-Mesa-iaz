@@ -1,0 +1,43 @@
+<body style="margin:0;background:#05070f;color:#00f5ff;font-family:Orbitron,sans-serif;text-align:center">
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.3.4/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<div id="gest" style="display:none"><video id="v" playsinline style="display:none"></video>
+<canvas id="o" width="480" height="360" style="width:100%;max-width:480px;border:2px solid #00f5ff;border-radius:12px"></canvas></div>
+<div id="voz" style="display:none"><button id="mic" style="font:700 20px Orbitron;padding:18px 30px;border-radius:50px;border:2px solid #ff2bd6;background:#1a0b2e;color:#ff2bd6">🎙️ HABLAR</button></div>
+<p id="txt" style="font-size:18px">Conectando...</p>
+<script>
+const Q=new URLSearchParams(location.search),P=Q.get("p")||"__PREFIJO__",MODO=Q.get("modo")||"__MODO__";
+const c=mqtt.connect("wss://broker.hivemq.com:8884/mqtt"), txt=document.getElementById("txt");
+const pub=o=>c.publish(P+"/entrada",JSON.stringify(o));
+c.on("connect",()=>txt.textContent="Conectado · modo "+MODO);
+document.getElementById(MODO=="voz"?"voz":"gest").style.display="block";
+if(MODO=="voz"){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition, rec=new SR(); let on=false;
+  rec.lang="es-ES";rec.continuous=true;
+  rec.onresult=e=>{const t=e.results[e.results.length-1][0].transcript.trim();txt.textContent="Escuché: "+t;pub({tipo:"voz",texto:t});};
+  rec.onend=()=>{if(on)rec.start()};
+  mic.onclick=()=>{on=!on;on?rec.start():rec.stop();mic.textContent=on?"🔴 ESCUCHANDO":"🎙️ HABLAR";};
+}else{
+  const ctx=o.getContext("2d"),d=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+  const hands=new Hands({locateFile:f=>"https://cdn.jsdelivr.net/npm/@mediapipe/hands/"+f});
+  hands.setOptions({maxNumHands:1,modelComplexity:0,minDetectionConfidence:.7,minTrackingConfidence:.6});
+  let last="",since=0,sent="";
+  hands.onResults(r=>{ctx.drawImage(r.image,0,0,480,360);
+    if(!r.multiHandLandmarks.length)return;
+    const L=r.multiHandLandmarks[0];drawConnectors(ctx,L,HAND_CONNECTIONS,{color:"#00f5ff"});drawLandmarks(ctx,L,{color:"#ff2bd6",radius:2});
+    const w=L[0];
+    const ext=[d(L[4],L[17])>d(L[3],L[17]),...[[8,6],[12,10],[16,14],[20,18]].map(([t,p])=>d(L[t],w)>d(L[p],w))].map(Number);
+    const k=ext.join("");let g,val;
+    if(k=="10000")g="escudos";
+    else if(k=="01001")g="despegue";
+    else if(k=="11111")g="compuerta";
+    else{g="motores";val=25*(ext[1]+ext[2]+ext[3]+ext[4]);}
+    const key=g+(val??"");
+    if(key!=last){last=key;since=performance.now();}
+    else if(performance.now()-since>600&&key!=sent){sent=key;pub({tipo:"gesto",gesto:g,valor:val});txt.textContent="Gesto: "+g+(val!=null?" "+val+"%":"");}
+  });
+  new Camera(v,{onFrame:async()=>{await hands.send({image:v})},width:480,height:360}).start();
+}
+</script></body>
