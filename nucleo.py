@@ -11,9 +11,9 @@ import streamlit.components.v1 as components
 import paho.mqtt.client as mqtt
 
 
-# ==========================================
-# CONFIGURACION GENERAL
-# ==========================================
+# =========================================================
+# CONFIGURACIÓN MQTT
+# =========================================================
 
 P = "NaveEspacial2026"
 
@@ -24,26 +24,29 @@ TOP_ENTRADA = f"{P}/entrada"
 TOP_COMANDOS = f"{P}/comandos"
 TOP_TELEMETRIA = f"{P}/telemetria"
 
-WEB = Path(__file__).resolve().parents[2] / "web"
+BASE = Path(__file__).resolve().parent
+WEB = BASE / "web"
 
 
-# ==========================================
-# NORMALIZAR TEXTO
-# ==========================================
+# =========================================================
+# NORMALIZACIÓN DE TEXTO
+# =========================================================
 
 def normalizar(texto):
-
     texto = str(texto).lower().strip()
 
-    return "".join(
-        c for c in unicodedata.normalize("NFD", texto)
+    texto = unicodedata.normalize("NFD", texto)
+    texto = "".join(
+        c for c in texto
         if unicodedata.category(c) != "Mn"
     )
 
+    return texto
 
-# ==========================================
-# INTERPRETAR VOZ
-# ==========================================
+
+# =========================================================
+# INTERPRETACIÓN DE VOZ
+# =========================================================
 
 def interpretar(texto):
 
@@ -51,101 +54,167 @@ def interpretar(texto):
 
     off = any(
         palabra in t
-        for palabra in (
-            "desactivar", "desactiv",
-            "apagar", "apag",
-            "cerrar", "cerr"
-        )
+        for palabra in ("desactiv", "apag", "cerr")
     )
 
     if "abort" in t:
-        return {"despegue": False}, "Misión abortada"
+        return {
+            "despegue": False,
+            "emergencia": True
+        }, "Misión abortada: emergencia activada"
 
     if "despeg" in t:
-        return {"despegue": True}, "Verificando despegue"
+        return {
+            "despegue": True
+        }, "Verificando condiciones de despegue..."
 
     if "escudo" in t:
-        return (
-            {"escudos": not off},
-            "Escudos " + ("desactivados" if off else "activados")
+        return {
+            "escudos": not off
+        }, (
+            "Escudos desactivados"
+            if off else
+            "Escudos activados, capitán"
         )
 
     if "alerta" in t:
-        return (
-            {"alerta": not off},
-            "Alerta " + ("apagada" if off else "activada")
+        return {
+            "alerta": not off
+        }, (
+            "Alerta manual apagada"
+            if off else
+            "Alerta manual activada"
         )
 
     if "compuerta" in t or "puerta" in t:
-        return (
-            {"compuerta": 0 if off else 90},
-            "Compuerta " + ("cerrándose" if off else "abriéndose")
+
+        angulo = 0 if off else 90
+
+        return {
+            "compuerta": angulo
+        }, (
+            "Compuerta cerrándose"
+            if off else
+            "Compuerta abriéndose"
         )
 
     if "motor" in t:
-        return (
-            {"motores": 0 if off else 80},
-            "Motores " + ("apagados" if off else "al 80 %")
+
+        velocidad = 0 if off else 80
+
+        return {
+            "motores": velocidad
+        }, (
+            "Motores apagados"
+            if off else
+            "Motores al 80 %"
         )
 
-    return None, "Comando no reconocido"
+    return None, "Comando de voz no reconocido"
 
 
-# ==========================================
-# INTERPRETAR GESTOS
-# ==========================================
+# =========================================================
+# INTERPRETACIÓN DE GESTOS
+# =========================================================
 
 def desde_gesto(evento, tele):
 
     gesto = evento.get("gesto")
 
     if gesto == "escudos":
-        return {"escudos": True}, "Escudos activados (gesto)"
+
+        return {
+            "escudos": True
+        }, "Escudos activados mediante gesto"
 
     if gesto == "despegue":
-        return {"despegue": True}, "Verificando despegue (gesto)"
+
+        return {
+            "despegue": True
+        }, "Verificando despegue mediante gesto"
 
     if gesto == "compuerta":
 
-        angulo = (
-            0 if tele.get("compuerta", 0) > 0 else 90
-        )
+        actual = float(tele.get("compuerta", 0) or 0)
 
-        return (
-            {"compuerta": angulo},
-            "Compuerta " + ("cerrándose" if angulo == 0 else "abriéndose")
+        angulo = 0 if actual > 0 else 90
+
+        return {
+            "compuerta": angulo
+        }, (
+            "Compuerta cerrándose"
+            if angulo == 0 else
+            "Compuerta abriéndose"
         )
 
     if gesto == "motores":
 
-        valor = int(evento.get("valor") or 0)
-        valor = max(0, min(100, valor))
+        velocidad = int(evento.get("valor") or 0)
+        velocidad = max(0, min(100, velocidad))
 
-        return (
-            {"motores": valor},
-            f"Motores al {valor} %"
+        return {
+            "motores": velocidad
+        }, f"Motores al {velocidad} %"
+
+    return None, "Gesto no reconocido"
+
+
+# =========================================================
+# NORMALIZACIÓN DE TELEMETRÍA
+# =========================================================
+
+def normalizar_telemetria(datos):
+
+    d = dict(datos)
+
+    # Compatibilidad con nombres del ESP32
+    if "combustible" not in d and "comb" in d:
+        d["combustible"] = d["comb"]
+
+    if "distancia" not in d and "dist" in d:
+        d["distancia"] = d["dist"]
+
+    if "emergencia" not in d and "emerg" in d:
+        d["emergencia"] = d["emerg"]
+
+    if "vuelo" in d and "mision" not in d:
+        d["mision"] = "EN VUELO" if d["vuelo"] else "PLATAFORMA"
+
+    if "meteoritos" not in d:
+        try:
+            d["meteoritos"] = (
+                float(d.get("temp", 0)) > 30
+                and not bool(d.get("escudos", False))
+            )
+        except (TypeError, ValueError):
+            d["meteoritos"] = False
+
+    if "alerta" not in d:
+        d["alerta"] = (
+            bool(d.get("alertaMan", False))
+            or bool(d.get("meteoritos", False))
+            or bool(d.get("emergencia", False))
         )
 
-    if gesto == "alerta":
-        return {"alerta": True}, "Alerta activada (gesto)"
-
-    return None, "Gesto desconocido"
+    return d
 
 
-# ==========================================
-# ESTADO Y BITACORA
-# ==========================================
+# =========================================================
+# BITÁCORA
+# =========================================================
 
 def agregar_log(S, texto):
 
+    hora = time.strftime("%H:%M:%S")
+
     S["log"] = [
-        time.strftime("%H:%M:%S") + " · " + str(texto)
+        f"{hora} · {texto}"
     ] + S["log"][:7]
 
 
-# ==========================================
-# PUBLICAR COMANDOS
-# ==========================================
+# =========================================================
+# PUBLICACIÓN DE COMANDOS
+# =========================================================
 
 def publicar_comando(S, client, cmd):
 
@@ -153,9 +222,7 @@ def publicar_comando(S, client, cmd):
         return False
 
     if not client.is_connected():
-
         S["pendientes"].append(cmd.copy())
-
         return False
 
     resultado = client.publish(
@@ -179,19 +246,18 @@ def registrar(S, client, cmd, respuesta):
         enviado = publicar_comando(S, client, cmd)
 
         if enviado:
-            respuesta += " · Orden enviada a MQTT"
-
+            respuesta += " · Publicada en MQTT"
         else:
-            respuesta += " · Orden pendiente de conexión MQTT"
+            respuesta += " · Pendiente de conexión MQTT"
 
     S["resp"] = respuesta
 
     agregar_log(S, respuesta)
 
 
-# ==========================================
-# PROCESAR MENSAJES EN STREAMLIT
-# ==========================================
+# =========================================================
+# PROCESAMIENTO DE EVENTOS MQTT
+# =========================================================
 
 def procesar_eventos(S, client):
 
@@ -203,16 +269,20 @@ def procesar_eventos(S, client):
         except queue.Empty:
             break
 
-        # CONEXION
+        # ---------------------------------------------
+        # ESTADO DE CONEXIÓN
+        # ---------------------------------------------
+
         if tipo == "conexion":
 
-            S["conectado"] = contenido
+            conectado = bool(contenido)
 
-            if contenido:
+            S["conectado"] = conectado
+
+            if conectado:
 
                 S["resp"] = "Conexión MQTT establecida"
 
-                # Enviar comandos pendientes
                 pendientes = S["pendientes"].copy()
                 S["pendientes"].clear()
 
@@ -228,26 +298,28 @@ def procesar_eventos(S, client):
                         S["pendientes"].append(cmd)
 
             else:
+
                 S["resp"] = "Conexión MQTT interrumpida"
 
-        # MENSAJES MQTT
+        # ---------------------------------------------
+        # MENSAJES RECIBIDOS
+        # ---------------------------------------------
+
         elif tipo == "mensaje":
 
             topic, datos = contenido
 
-            # TELEMETRIA
+            # TELEMETRÍA DEL ESP32
             if topic == TOP_TELEMETRIA:
 
-                if isinstance(datos, dict):
+                datos = normalizar_telemetria(datos)
 
-                    S["tele"].update(datos)
+                S["tele"].update(datos)
 
-                    S["ultima_telemetria"] = time.time()
+                S["ultima_telemetria"] = time.time()
 
-                continue
-
-            # ENTRADA DE GESTOS Y AUDIO
-            if topic == TOP_ENTRADA:
+            # ENTRADA DE VOZ Y GESTOS
+            elif topic == TOP_ENTRADA:
 
                 if datos.get("tipo") == "voz":
 
@@ -257,7 +329,7 @@ def procesar_eventos(S, client):
 
                     cmd, respuesta = interpretar(texto)
 
-                else:
+                elif datos.get("tipo") == "gesto":
 
                     gesto = datos.get("gesto", "desconocido")
 
@@ -268,6 +340,11 @@ def procesar_eventos(S, client):
                         S["tele"]
                     )
 
+                else:
+
+                    cmd = None
+                    respuesta = "Entrada MQTT desconocida"
+
                 registrar(
                     S,
                     client,
@@ -276,29 +353,21 @@ def procesar_eventos(S, client):
                 )
 
 
-# ==========================================
-# UNICO NUCLEO MQTT
-# ==========================================
+# =========================================================
+# CONEXIÓN MQTT COMPARTIDA
+# =========================================================
 
 @st.cache_resource
 def nucleo():
 
     S = {
-
         "tele": {},
-
         "log": [],
-
         "oido": "—",
-
         "resp": "Esperando órdenes",
-
         "conectado": False,
-
         "cola": queue.Queue(),
-
         "pendientes": [],
-
         "ultima_telemetria": None
     }
 
@@ -318,7 +387,9 @@ def nucleo():
 
         conectado = int(codigo) == 0
 
-        S["cola"].put(("conexion", conectado))
+        S["cola"].put(
+            ("conexion", conectado)
+        )
 
         if conectado:
 
@@ -335,7 +406,9 @@ def nucleo():
         properties
     ):
 
-        S["cola"].put(("conexion", False))
+        S["cola"].put(
+            ("conexion", False)
+        )
 
     def on_message(client, userdata, msg):
 
@@ -349,7 +422,10 @@ def nucleo():
                 ("mensaje", (msg.topic, datos))
             )
 
-        except (ValueError, UnicodeDecodeError):
+        except (
+            ValueError,
+            UnicodeDecodeError
+        ):
             return
 
     client = mqtt.Client(
@@ -378,9 +454,9 @@ def nucleo():
     return S, client
 
 
-# ==========================================
-# COMANDOS DESDE AUDIO
-# ==========================================
+# =========================================================
+# FUNCIONES PARA ÓRDENES MANUALES
+# =========================================================
 
 def ejecutar(texto):
 
@@ -398,10 +474,6 @@ def ejecutar(texto):
     )
 
 
-# ==========================================
-# COMANDOS MANUALES
-# ==========================================
-
 def enviar(**cmd):
 
     S, client = nucleo()
@@ -414,9 +486,9 @@ def enviar(**cmd):
     )
 
 
-# ==========================================
-# VISUALIZACION DE LA NAVE
-# ==========================================
+# =========================================================
+# VISUALIZACIÓN HTML
+# =========================================================
 
 def visual():
 
@@ -424,13 +496,17 @@ def visual():
 
     if not archivo.exists():
 
-        st.error(f"No se encuentra el archivo: {archivo}")
-
+        st.error(f"No se encuentra {archivo}")
         return
 
-    html = archivo.read_text(encoding="utf-8")
+    html = archivo.read_text(
+        encoding="utf-8"
+    )
 
-    html = html.replace("__PREFIJO__", P)
+    html = html.replace(
+        "__PREFIJO__",
+        P
+    )
 
     components.html(
         html,
@@ -439,24 +515,37 @@ def visual():
     )
 
 
-# ==========================================
-# CAPTURA DE GESTOS Y AUDIO
-# ==========================================
+# =========================================================
+# CAPTURA HTML
+# =========================================================
 
 def captura(modo, h=480):
+
+    if modo not in ("gest", "voz"):
+
+        st.error("Modo de captura no válido")
+        return
 
     archivo = WEB / "captura.html"
 
     if not archivo.exists():
 
-        st.error(f"No se encuentra el archivo: {archivo}")
-
+        st.error(f"No se encuentra {archivo}")
         return
 
-    html = archivo.read_text(encoding="utf-8")
+    html = archivo.read_text(
+        encoding="utf-8"
+    )
 
-    html = html.replace("__PREFIJO__", P)
-    html = html.replace("__MODO__", modo)
+    html = html.replace(
+        "__PREFIJO__",
+        P
+    )
+
+    html = html.replace(
+        "__MODO__",
+        modo
+    )
 
     components.html(
         html,
@@ -465,52 +554,59 @@ def captura(modo, h=480):
     )
 
 
-# ==========================================
+# =========================================================
 # ESTILOS
-# ==========================================
+# =========================================================
 
 def estilos():
 
-    st.markdown("""
-    <style>
+    st.markdown(
+        """
+        <style>
 
-    @import url(
-      'https://fonts.googleapis.com/css2?family=Orbitron:wght@500;800&display=swap'
-    );
+        @import url(
+          'https://fonts.googleapis.com/css2?family=Orbitron:wght@500;800&display=swap'
+        );
 
-    .stApp {
-        background: linear-gradient(160deg,#05070f,#1a0b2e);
-        color: #d7f8ff;
-    }
+        .stApp {
+            background: linear-gradient(
+                160deg,
+                #05070f,
+                #1a0b2e
+            );
+            color: #d7f8ff;
+        }
 
-    h1,h2,h3,h4,
-    [data-testid="stMetricValue"] {
-        font-family: 'Orbitron', sans-serif !important;
-        color: #00f5ff !important;
-        text-shadow: 0 0 12px #00f5ff88;
-    }
+        h1, h2, h3, h4,
+        [data-testid="stMetricValue"] {
+            font-family: 'Orbitron', sans-serif !important;
+            color: #00f5ff !important;
+            text-shadow: 0 0 12px #00f5ff88;
+        }
 
-    [data-testid="stMetric"] {
-        border: 1px solid #00f5ff66;
-        border-radius: 12px;
-        padding: 10px;
-        box-shadow: 0 0 14px #00f5ff33;
-    }
+        [data-testid="stMetric"] {
+            border: 1px solid #00f5ff66;
+            border-radius: 12px;
+            padding: 10px;
+            box-shadow: 0 0 14px #00f5ff33;
+        }
 
-    .resp {
-        border-left: 4px solid #ff2bd6;
-        padding: 8px 14px;
-        background: #ff2bd610;
-        border-radius: 6px;
-    }
+        .resp {
+            border-left: 4px solid #ff2bd6;
+            padding: 8px 14px;
+            background: #ff2bd610;
+            border-radius: 6px;
+        }
 
-    </style>
-    """, unsafe_allow_html=True)
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
 
 
-# ==========================================
-# ESTADO EN TIEMPO REAL
-# ==========================================
+# =========================================================
+# PANEL DE ESTADO
+# =========================================================
 
 @st.fragment(run_every=1)
 def estado():
@@ -521,82 +617,117 @@ def estado():
 
     t = S["tele"]
 
-    st.caption(
-        "MQTT: " +
-        ("CONECTADO" if S["conectado"] else "DESCONECTADO")
-    )
+    st.subheader("CENTRO DE CONTROL")
+
+    if S["conectado"]:
+
+        st.success("MQTT conectado")
+
+    else:
+
+        st.warning("Conectando con HiveMQ...")
 
     if not t:
 
         st.warning(
-            "Sin telemetría. Comprueba que Wokwi esté ejecutándose."
+            "Sin telemetría. Comprueba que Wokwi esté "
+            "ejecutándose y que el prefijo MQTT coincida."
         )
 
-        st.caption("Esperando datos de la nave espacial...")
+    else:
 
-        return
+        # Valores numéricos seguros
+        try:
+            temperatura = float(t.get("temp", 0) or 0)
+        except (TypeError, ValueError):
+            temperatura = 0.0
 
-    a, b = st.columns(2)
+        try:
+            combustible = float(t.get("combustible", 0) or 0)
+        except (TypeError, ValueError):
+            combustible = 0.0
 
-    a.metric(
-        "Misión",
-        t.get("mision", "—")
-    )
+        try:
+            distancia = float(t.get("distancia", 0) or 0)
+        except (TypeError, ValueError):
+            distancia = 0.0
 
-    b.metric(
-        "Reactor",
-        f"{float(t.get('temp', 0)):.1f} °C"
-    )
+        try:
+            motores = float(t.get("motores", 0) or 0)
+        except (TypeError, ValueError):
+            motores = 0.0
 
-    a, b = st.columns(2)
+        compuerta = float(t.get("compuerta", 0) or 0)
 
-    a.metric(
-        "Escudos",
-        "ON" if t.get("escudos") else "OFF"
-    )
+        mision = t.get("mision", "—")
 
-    b.metric(
-        "Compuerta",
-        "ABIERTA" if t.get("compuerta", 0) > 0 else "CERRADA"
-    )
+        a, b = st.columns(2)
 
-    a, b = st.columns(2)
+        a.metric("Misión", str(mision))
+        b.metric("Reactor", f"{temperatura:.1f} °C")
 
-    a.metric(
-        "Combustible",
-        f"{t.get('combustible', 0)} %"
-    )
+        a, b = st.columns(2)
 
-    b.metric(
-        "Alerta",
-        "ACTIVA" if t.get("alerta") else "INACTIVA"
-    )
+        a.metric(
+            "Escudos",
+            "ON" if t.get("escudos") else "OFF"
+        )
 
-    a, b = st.columns(2)
+        b.metric(
+            "Compuerta",
+            "ABIERTA" if compuerta > 0 else "CERRADA"
+        )
 
-    a.metric(
-        "Motores",
-        f"{t.get('motores', 0)} %"
-    )
+        a, b = st.columns(2)
 
-    b.metric(
-        "Meteoritos",
-        "DETECTADOS" if t.get("meteoritos") else "NO"
-    )
+        a.metric(
+            "Combustible",
+            f"{combustible:.0f} %"
+        )
 
-    st.caption("Entendí: " + S["oido"])
+        b.metric(
+            "Motores",
+            f"{motores:.0f} %"
+        )
+
+        a, b = st.columns(2)
+
+        a.metric(
+            "Radar",
+            f"{distancia:.1f} cm"
+        )
+
+        b.metric(
+            "Alerta",
+            "ACTIVA" if t.get("alerta") else "NORMAL"
+        )
+
+        if t.get("meteoritos"):
+            st.warning("¡Meteoritos detectados!")
+
+        if t.get("emergencia"):
+            st.error("¡EMERGENCIA ACTIVA!")
+
+        if t.get("motivo"):
+            st.warning(str(t["motivo"]))
+
+        if S["ultima_telemetria"]:
+
+            edad = time.time() - S["ultima_telemetria"]
+
+            st.caption(
+                f"Última telemetría hace {edad:.1f} segundos"
+            )
+
+    st.caption("Entrada reconocida: " + str(S["oido"]))
 
     st.markdown(
         f"<div class='resp'>{S['resp']}</div>",
         unsafe_allow_html=True
     )
 
-    if t.get("motivo"):
-
-        st.warning(t["motivo"])
-
-    st.caption("Bitácora")
+    st.caption("BITÁCORA DE LA MISIÓN")
 
     st.code(
-        "\n".join(S["log"]) or "—"
+        "\n".join(S["log"]) or "Esperando eventos..."
     )
