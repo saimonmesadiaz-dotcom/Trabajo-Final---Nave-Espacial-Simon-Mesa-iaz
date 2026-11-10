@@ -4,7 +4,9 @@ import streamlit as st
 import streamlit.components.v1 as components
 import paho.mqtt.client as mqtt
 
-P = "nave_CAMBIA_2026"            # igual que en Wokwi y web/
+P = "nave_CAMBIA_2026"
+# Conexión al broker MQTT
+c.connect("broker.hivemq.com", 1883)
 WEB = Path(__file__).resolve().parents[2] / "web"
 
 def interpretar(t):
