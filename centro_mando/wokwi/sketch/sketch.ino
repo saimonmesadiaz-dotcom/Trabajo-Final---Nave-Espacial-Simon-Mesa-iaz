@@ -4,7 +4,7 @@
 #include <DHT.h>
 #include <ESP32Servo.h>
 
-const char* PREFIJO = "nave_CAMBIA_2026";   // igual en todos los archivos
+const char* PREFIJO = "NaveEspacial2026";   // igual en todos los archivos
 #define P_DHT 15
 #define P_POT 34
 #define P_TRIG 5
