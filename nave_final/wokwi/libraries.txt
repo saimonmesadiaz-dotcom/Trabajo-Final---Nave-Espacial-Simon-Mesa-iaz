@@ -1,5 +1,0 @@
-PubSubClient
-DHT sensor library
-Adafruit Unified Sensor
-ESP32Servo
-ArduinoJson
