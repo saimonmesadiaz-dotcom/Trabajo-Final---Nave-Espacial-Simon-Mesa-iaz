@@ -194,13 +194,13 @@ def tema():
         margin-bottom: 0;
     }
 
-    [data-testid="stSidebarUserContent"] {
-        order: 1;
-        padding-top: 0;
-        padding-bottom: 0;
-    }
+    [data-testid="stSidebarNav"] { order: 1; }
 
-    [data-testid="stSidebarNav"] { order: 2; }
+    [data-testid="stSidebarUserContent"] {
+        order: 2;
+        padding-top: 4px;
+        padding-bottom: 2rem;
+    }
 
     [data-testid="stSidebar"] p,
     [data-testid="stSidebar"] label,
@@ -208,26 +208,14 @@ def tema():
         color: #d6e9ff !important;
     }
 
-    /* Tarjeta de guía: con scroll propio */
+    /* Guía: texto plano; se lee haciendo scroll en la barra */
     .guia {
         position: relative;
-        margin: 2px 4px 8px 4px;
-        padding: 12px 14px 8px 14px;
-        border: 1px solid rgba(130, 200, 255, 0.55);
-        border-radius: 14px;
-        background: rgba(5, 20, 60, 0.55);
-        backdrop-filter: blur(3px);
-        font-size: 13px;
-        line-height: 1.5;
-        max-height: 40vh;
-        overflow-y: auto;
-        scrollbar-width: thin;
-        scrollbar-color: #5db4ff #0a2a6e;
+        margin: 6px 6px 8px 6px;
+        padding: 0 4px;
+        font-size: 13.5px;
+        line-height: 1.55;
     }
-
-    .guia::-webkit-scrollbar { width: 6px; }
-    .guia::-webkit-scrollbar-thumb { background: #5db4ff; border-radius: 6px; }
-    .guia::-webkit-scrollbar-track { background: transparent; }
 
     .guia-t {
         font-family: 'Orbitron', sans-serif;
@@ -243,16 +231,17 @@ def tema():
     .guia li { margin-bottom: 4px; }
     .guia b { color: #ffffff; }
 
-    /* Navegación: borde brillante que gira al pasar el cursor.
-       Tiene scroll propio y queda pegada a la guía. */
+    /* Navegación FIJA arriba (no se va al hacer scroll) */
     [data-testid="stSidebarNav"] {
-        position: relative;
-        z-index: 2;
-        padding: 2px 10px 6px 6px;
-        max-height: 34vh;
-        overflow-y: auto;
-        scrollbar-width: thin;
-        scrollbar-color: #5db4ff transparent;
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        padding: 6px 10px 8px 6px;
+        max-height: none;
+        overflow: visible;
+        background: linear-gradient(180deg, #0f3d94 0%, #0d3688 100%);
+        border-bottom: 1px solid rgba(130, 200, 255, 0.35);
+        box-shadow: 0 8px 14px -8px rgba(0, 10, 50, 0.7);
     }
 
     [data-testid="stSidebarNav"] ul { padding-top: 0; margin-top: 0; }
