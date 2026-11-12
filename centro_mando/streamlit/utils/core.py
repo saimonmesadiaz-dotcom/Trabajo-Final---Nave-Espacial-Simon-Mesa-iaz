@@ -1,598 +1,259 @@
-
-import json
-import time
-import queue
-import uuid
-from pathlib import Path
-
+# utils/core.py
 import streamlit as st
-import streamlit.components.v1 as components
-import paho.mqtt.client as mqtt
 
-
-# =====================================================
-# CONFIGURACIÓN
-# =====================================================
-
-P = "NaveEspacial2026"
-
-BROKER = "broker.hivemq.com"
-PORT = 1883
-
-TOP_COMANDOS = f"{P}/comandos"
-TOP_TELEMETRIA = f"{P}/telemetria"
-TOP_ENTRADA = f"{P}/entrada"
-
-WEB = Path(__file__).resolve().parents[2] / "web"
-
-
-# =====================================================
-# ESTADO Y UTILIDADES
-# =====================================================
-
-def normalizar_telemetria(datos):
-    d = dict(datos)
-
-    # Compatibilidad con los nombres del ESP32
-    if "combustible" not in d and "comb" in d:
-        d["combustible"] = d["comb"]
-
-    if "distancia" not in d and "dist" in d:
-        d["distancia"] = d["dist"]
-
-    if "emergencia" not in d and "emerg" in d:
-        d["emergencia"] = d["emerg"]
-
-    return d
-
-
-def agregar_log(S, texto):
-    hora = time.strftime("%H:%M:%S")
-    S["log"] = [f"{hora} · {texto}"] + S["log"][:7]
-
-
-# =====================================================
-# INTERPRETACIÓN DE VOZ
-# Se conserva la lógica original
-# =====================================================
-
-def interpretar(t):
-    t = t.lower().strip()
-
-    off = any(
-        w in t
-        for w in ("desactiv", "apag", "cerr")
-    )
-
-    if "abort" in t:
-        return {"despegue": False}, "Misión abortada"
-
-    if "despeg" in t:
-        return {"despegue": True}, "Verificando despegue..."
-
-    if "escudo" in t:
-        return (
-            {"escudos": not off},
-            "Escudos " + (
-                "desactivados" if off else "activados, capitán"
-            )
-        )
-
-    if "alerta" in t:
-        return (
-            {"alerta": not off},
-            "Alerta " + (
-                "apagada" if off else "roja activada"
-            )
-        )
-
-    if "compuerta" in t or "puerta" in t:
-        return (
-            {"compuerta": 0 if off else 90},
-            "Compuerta " + (
-                "cerrándose" if off else "abriéndose"
-            )
-        )
-
-    if "motor" in t:
-        return (
-            {"motores": 0 if off else 80},
-            "Motores " + (
-                "apagados" if off else "al 80 %"
-            )
-        )
-
-    return None, "Comando no reconocido"
-
-
-# =====================================================
-# INTERPRETACIÓN DE GESTOS
-# Se conserva la lógica original
-# =====================================================
-
-def desde_gesto(e, tele):
-    g = e.get("gesto")
-
-    if g == "escudos":
-        return {
-            "escudos": True
-        }, "Escudos activados (gesto 👍)"
-
-    if g == "despegue":
-        return {
-            "despegue": True
-        }, "Verificando despegue (gesto 🤘)"
-
-    if g == "compuerta":
-        a = 0 if float(tele.get("compuerta", 0) or 0) > 0 else 90
-
-        return (
-            {"compuerta": a},
-            "Compuerta " + (
-                "cerrándose" if a == 0 else "abriéndose"
-            )
-        )
-
-    if g == "motores":
-        v = int(e.get("valor") or 0)
-        v = max(0, min(100, v))
-
-        return {
-            "motores": v
-        }, f"Motores al {v} %"
-
-    return None, "Gesto desconocido"
-
-
-# =====================================================
-# PUBLICAR COMANDOS DESDE STREAMLIT
-# =====================================================
-
-def registrar(S, client, cmd, resp):
-
-    if cmd:
-
-        if not client.is_connected():
-            S["resp"] = "MQTT desconectado. No se pudo enviar la orden."
-            agregar_log(S, S["resp"])
-            return
-
-        try:
-            resultado = client.publish(
-                TOP_COMANDOS,
-                json.dumps(cmd),
-                qos=1
-            )
-
-            if resultado.rc == mqtt.MQTT_ERR_SUCCESS:
-                resp += " · Orden enviada; esperando confirmación del ESP32"
-            else:
-                resp += " · Error al publicar la orden MQTT"
-
-        except Exception as e:
-            resp += f" · Error MQTT: {e}"
-
-    S["resp"] = resp
-    agregar_log(S, resp)
-
-
-def enviar(**cmd):
-    S, client = nucleo()
-
-    registrar(
-        S,
-        client,
-        cmd,
-        "Orden manual: " + json.dumps(cmd)
-    )
-
-
-def ejecutar(texto):
-    S, client = nucleo()
-
-    S["oido"] = texto
-
-    cmd, resp = interpretar(texto)
-
-    registrar(S, client, cmd, resp)
-
-
-# =====================================================
-# PROCESAMIENTO DE MENSAJES
-# Esta función se ejecuta desde Streamlit,
-# NO desde el hilo MQTT.
-# =====================================================
-
-def procesar_eventos(S, client):
-
-    while True:
-        try:
-            tipo, contenido = S["cola"].get_nowait()
-        except queue.Empty:
-            break
-
-        # ---------------------------------------------
-        # CONEXIÓN MQTT
-        # ---------------------------------------------
-
-        if tipo == "conexion":
-
-            S["conectado"] = contenido
-
-            if contenido:
-                S["resp"] = "Conexión MQTT establecida"
-
-                agregar_log(
-                    S,
-                    "Conexión con HiveMQ establecida"
-                )
-
-                # Reintentar suscripciones
-                client.subscribe([
-                    (TOP_TELEMETRIA, 1),
-                    (TOP_ENTRADA, 1)
-                ])
-
-            else:
-                S["resp"] = "Conexión MQTT interrumpida"
-
-                agregar_log(
-                    S,
-                    "Conexión MQTT interrumpida"
-                )
-
-        # ---------------------------------------------
-        # MENSAJES MQTT
-        # ---------------------------------------------
-
-        elif tipo == "mensaje":
-
-            topic, datos = contenido
-
-            # TELEMETRÍA DEL ESP32
-            if topic == TOP_TELEMETRIA:
-
-                datos = normalizar_telemetria(datos)
-
-                S["tele"].update(datos)
-
-                S["ultima_telemetria"] = time.time()
-
-            # ENTRADAS DE VOZ Y GESTOS
-            elif topic == TOP_ENTRADA:
-
-                if datos.get("tipo") == "voz":
-
-                    texto = str(datos.get("texto", ""))
-
-                    S["oido"] = texto
-
-                    cmd, resp = interpretar(texto)
-
-                elif datos.get("tipo") == "gesto":
-
-                    gesto = datos.get("gesto", "desconocido")
-
-                    S["oido"] = "gesto: " + str(gesto)
-
-                    cmd, resp = desde_gesto(
-                        datos,
-                        S["tele"]
-                    )
-
-                else:
-                    cmd = None
-                    resp = "Entrada MQTT desconocida"
-
-                registrar(
-                    S,
-                    client,
-                    cmd,
-                    resp
-                )
-
-
-# =====================================================
-# NÚCLEO MQTT COMPARTIDO
-# =====================================================
-
-@st.cache_resource
-def nucleo():
-
-    S = {
-        "tele": {},
-        "log": [],
-        "oido": "—",
-        "resp": "Esperando órdenes",
-        "conectado": False,
-        "cola": queue.Queue(),
-        "ultima_telemetria": None
-    }
-
-    # Paho MQTT 1.6.1: callbacks API versión 1
-    def on_connect(client, userdata, flags, rc):
-
-        if rc == 0:
-
-            S["cola"].put(
-                ("conexion", True)
-            )
-
-            client.subscribe([
-                (TOP_TELEMETRIA, 1),
-                (TOP_ENTRADA, 1)
-            ])
-
+def inicializar_estado():
+    if "estado_sistema" not in st.session_state:
+        st.session_state.estado_sistema = {
+            "conexion_wokwi": True,
+            "compuerta": "Cerrada",          # Abierta / Cerrada
+            "escudos": "Desactivos",         # Activos / Desactivos
+            "alerta": "Normal",              # Normal / Alerta Roja / Alerta Extrema
+            "combustible": 45,               # Porcentaje simulado
+            "comandos_validos": [
+                "Abrir compuerta", "Cerrar compuerta",
+                "Activar escudos", "Desactivar escudos",
+                "Activar alerta roja", "Normal", "Iniciar despegue"
+            ]
+        }
+
+def procesar_comando(comando: str):
+    cmd = comando.lower().strip()
+    st.session_state.ultimo_comando = comando
+    
+    if "abrir compuerta" in cmd:
+        st.session_state.estado_sistema["compuerta"] = "Abierta"
+    elif "cerrar compuerta" in cmd:
+        st.session_state.estado_sistema["compuerta"] = "Cerrada"
+    elif "activar escudos" in cmd:
+        st.session_state.estado_sistema["escudos"] = "Activos"
+    elif "desactivar escudos" in cmd:
+        st.session_state.estado_sistema["escudos"] = "Desactivos"
+    elif "alerta roja" in cmd:
+        st.session_state.estado_sistema["alerta"] = "Alerta Roja"
+    elif "normal" in cmd:
+        st.session_state.estado_sistema["alerta"] = "Normal"
+    elif "iniciar despegue" in cmd:
+        if st.session_state.estado_sistema["combustible"] < 50:
+            st.session_state.estado_sistema["alerta"] = "Alerta Roja"
         else:
+            st.success("🚀 Despegue autorizado y sincronizado con Wokwi.")
+```[cite: 11]
 
-            S["cola"].put(
-                ("conexion", False)
-            )
+---
 
-    def on_disconnect(client, userdata, rc):
+### 2. Actualización de `utils/tema.py` (Estética Espacial, Barra Lateral Azul y Efectos de Brillo)
+Este módulo inyecta los estilos CSS para la barra lateral azul espacial con estrellas levitando, los efectos de brillo (*glow*) en los enlaces y los paneles de telemetría.
 
-        S["cola"].put(
-            ("conexion", False)
-        )
+```python
+# utils/tema.py
+import streamlit as st
 
-    def on_message(client, userdata, msg):
-
-        try:
-
-            datos = json.loads(
-                msg.payload.decode("utf-8")
-            )
-
-            # El hilo MQTT solamente coloca el mensaje
-            # en la cola. No modifica la interfaz.
-            S["cola"].put(
-                ("mensaje", (msg.topic, datos))
-            )
-
-        except (
-            ValueError,
-            UnicodeDecodeError
-        ):
-            return
-
-    client = mqtt.Client(
-        client_id="NaveStreamlit_" + uuid.uuid4().hex[:10],
-        clean_session=True
-    )
-
-    client.on_connect = on_connect
-    client.on_disconnect = on_disconnect
-    client.on_message = on_message
-
-    client.reconnect_delay_set(
-        min_delay=1,
-        max_delay=30
-    )
-
-    client.connect_async(
-        BROKER,
-        PORT,
-        60
-    )
-
-    client.loop_start()
-
-    return S, client
-
-
-# =====================================================
-# VISUALIZACIÓN HTML
-# =====================================================
-
-def visual():
-
-    archivo = WEB / "visual.html"
-
-    if not archivo.exists():
-        st.error(f"No se encuentra el archivo: {archivo}")
-        return
-
-    html = archivo.read_text(encoding="utf-8")
-
-    html = html.replace(
-        "__PREFIJO__",
-        P
-    )
-
-    components.html(
-        html,
-        height=440,
-        scrolling=False
-    )
-
-
-# =====================================================
-# CAPTURA HTML
-# Se conserva el modo original
-# =====================================================
-
-def captura(modo, h=480):
-
-    archivo = WEB / "captura.html"
-
-    if not archivo.exists():
-        st.error(f"No se encuentra el archivo: {archivo}")
-        return
-
-    html = archivo.read_text(encoding="utf-8")
-
-    html = html.replace(
-        "__PREFIJO__",
-        P
-    )
-
-    html = html.replace(
-        "__MODO__",
-        modo
-    )
-
-    components.html(
-        html,
-        height=h,
-        scrolling=False
-    )
-
-
-# =====================================================
-# ESTILOS
-# =====================================================
-
-def estilos():
-
+def aplicar_estilos_espaciales():
     st.markdown("""
-    <style>
+        <style>
+        /* Fondo general de la aplicación */
+        .stApp {
+            background-color: #0b0f19;
+            color: #e2e8f0;
+        }
 
-    @import url(
-      'https://fonts.googleapis.com/css2?family=Orbitron:wght@500;800&display=swap'
-    );
+        /* Barra lateral con diseño azul espacial */
+        [data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #090d16 0%, #1e1b4b 100%);
+            border-right: 1px solid #312e81;
+        }
+        
+        [data-testid="stSidebar"] * {
+            color: #f8fafc !important;
+        }
 
-    .stApp {
-        background: linear-gradient(160deg,#05070f,#1a0b2e);
-        color: #d7f8ff;
-    }
+        /* Efecto brillo / hover en enlaces de la barra lateral */
+        [data-testid="stSidebar"] .stMarkdown a {
+            transition: all 0.3s ease;
+            border-radius: 8px;
+            padding: 4px 8px;
+        }
+        [data-testid="stSidebar"] .stMarkdown a:hover {
+            background-color: rgba(59, 130, 246, 0.25);
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.7);
+            color: #60a5fa !important;
+        }
 
-    h1,h2,h3,h4,
-    [data-testid="stMetricValue"] {
-        font-family: 'Orbitron',sans-serif !important;
-        color: #00f5ff !important;
-        text-shadow: 0 0 12px #00f5ff88;
-    }
+        /* Tarjetas de telemetría y paneles estéticos */
+        .metric-card {
+            background: rgba(30, 41, 59, 0.7);
+            border: 1px solid #334155;
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(4px);
+        }
 
-    [data-testid="stMetric"] {
-        border: 1px solid #00f5ff66;
-        border-radius: 12px;
-        padding: 10px;
-        box-shadow: 0 0 14px #00f5ff33;
-    }
-
-    .resp {
-        border-left: 4px solid #ff2bd6;
-        padding: 8px 14px;
-        background: #ff2bd610;
-        border-radius: 6px;
-    }
-
-    </style>
+        /* Header fijo superior de estado con Wokwi */
+        .telemetry-header {
+            position: sticky;
+            top: 0;
+            z-index: 999;
+            background: rgba(15, 23, 42, 0.95);
+            border-bottom: 1px solid #1e293b;
+            padding: 10px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        </style>
     """, unsafe_allow_html=True)
 
+def render_header_telemetria():
+    estado = st.session_state.estado_sistema
+    conexion = "🟢 Conectado a Wokwi (MQTT)" if estado["conexion_wokwi"] else "🔴 Desconectado de Wokwi"
+    alerta_color = "#ef4444" if estado["alerta"] != "Normal" else "#22c55e"
+    
+    st.markdown(f"""
+        <div class="telemetry-header">
+            <div><b>CENTRO DE MANDO ESPACIAL</b></div>
+            <div>{conexion}</div>
+            <div style="color: {alerta_color}; font-weight: bold;">ESTADO: {estado['alerta'].upper()}</div>
+        </div>
+    """, unsafe_allow_html=True)
+```[cite: 11]
 
-# =====================================================
-# PANEL DE ESTADO
-# Lee la telemetría real del ESP32
-# =====================================================
+---
 
-@st.fragment(run_every=1)
-def estado():
+### 3. Actualización de `app.py` (Página Principal con Guía, Header Fijo y Alertas Sincronizadas)
+Este archivo organiza la guía inicial en la barra lateral, muestra el listado de comandos y valida coherentemente las alertas en el header fijo si intentas despegar con combustible bajo.
 
-    S, client = nucleo()
+```python
+# app.py
+import streamlit as st
+from utils.core import inicializar_estado, procesar_comando
+from utils.tema import aplicar_estilos_espaciales, render_header_telemetria
 
-    # Procesar mensajes pendientes
-    procesar_eventos(S, client)
+st.set_page_config(page_title="Centro de Mando - Nave Espacial", layout="wide")
 
-    t = S["tele"]
+# Inicializar estilos espaciales y estado
+aplicar_estilos_espaciales()
+inicializar_estado()
 
-    st.markdown("### ESTADO DE LA NAVE")
-
-    if S["conectado"]:
-        st.success("MQTT conectado con HiveMQ")
-    else:
-        st.warning("Conectando con HiveMQ...")
-
-    if not t:
-
-        st.warning(
-            "Esperando telemetría del ESP32 de Wokwi..."
-        )
-
-    else:
-
-        temp = float(t.get("temp", 0) or 0)
-        comb = float(t.get("combustible", 0) or 0)
-        dist = float(t.get("distancia", 0) or 0)
-        motores = float(t.get("motores", 0) or 0)
-        compuerta = float(t.get("compuerta", 0) or 0)
-
-        a, b = st.columns(2)
-
-        a.metric(
-            "Misión",
-            str(t.get("mision", "—"))
-        )
-
-        b.metric(
-            "Reactor",
-            f"{temp:.1f} °C"
-        )
-
-        a, b = st.columns(2)
-
-        a.metric(
-            "Escudos",
-            "ACTIVADOS" if t.get("escudos") else "DESACTIVADOS"
-        )
-
-        b.metric(
-            "Compuerta",
-            "ABIERTA" if compuerta > 0 else "CERRADA"
-        )
-
-        a, b = st.columns(2)
-
-        a.metric(
-            "Combustible",
-            f"{comb:.0f} %"
-        )
-
-        b.metric(
-            "Motores",
-            f"{motores:.0f} %"
-        )
-
-        a, b = st.columns(2)
-
-        a.metric(
-            "Radar",
-            f"{dist:.1f} cm"
-        )
-
-        b.metric(
-            "Alerta",
-            "ACTIVA" if t.get("alerta") else "NORMAL"
-        )
-
-        if t.get("meteoritos"):
-            st.warning("¡Meteoritos detectados!")
-
-        if t.get("emergencia"):
-            st.error("¡EMERGENCIA ACTIVA!")
-
-        if t.get("motivo"):
-            st.warning(str(t["motivo"]))
-
-        if S["ultima_telemetria"] is not None:
-
-            edad = time.time() - S["ultima_telemetria"]
-
-            st.caption(
-                f"Última telemetría recibida hace {edad:.1f} segundos"
-            )
-
-    st.caption(
-        "Entrada reconocida: " + str(S["oido"])
+# --- BARRA LATERAL (Diseño Azul y Guía) ---
+with st.sidebar:
+    st.image("https://img.icons8.com/ios-filled/100/60a5fa/rocket.png", width=60)
+    st.title("🛰️ Guía del Sistema")
+    st.markdown("---")
+    st.markdown("### ¿En qué consiste esta interfaz?")
+    st.info(
+        "Esta interfaz de control permite enviar comandos de voz o gestos simulados "
+        "para interactuar en tiempo real con los subsistemas físicos simulados en **Wokwi**."
     )
+    
+    st.markdown("### 📋 Comandos Válidos")
+    st.markdown("""
+    Ejemplos de comandos admitidos:
+    * `Abrir compuerta` / `Cerrar compuerta`
+    * `Activar escudos` / `Desactivar escudos`
+    * `Activar alerta roja` / `Normal`
+    * `Iniciar despegue`
+    """)
+    st.markdown("---")
+    st.markdown("🌟 *Ingeniería de Diseño - EAFIT*")
 
-    st.markdown(
-        f"<div class='resp'>{S['resp']}</div>",
-        unsafe_allow_html=True
-    )
+# --- PANTALLA PRINCIPAL ---
+render_header_telemetria()
 
-    st.caption("BITÁCORA")
+st.title("🚀 Tablero de Control y Telemetría")
 
-    st.code(
-        "\n".join(S["log"]) or "Esperando eventos..."
-    )
+# Control de entrada de comandos
+col_input, col_btn = st.columns([3, 1])
+with col_input:
+    comando_usuario = st.text_input("Introduce comando de voz o gesto:", placeholder="Ej. Abrir compuerta...")
+with col_btn:
+    st.text("")
+    st.text("")
+    if st.button("Enviar Comando", type="primary"):
+        if comando_usuario:
+            procesar_comando(comando_usuario)
+            st.rerun()
+
+st.markdown("---")
+
+# --- PANELES DE ESTADO VISUAL ---
+col1, col2, col3, col4 = st.columns(4)
+estado = st.session_state.estado_sistema
+
+with col1:
+    st.markdown(f"""
+        <div class="metric-card">
+            <h4>🚪 Compuerta</h4>
+            <h2>{estado['compuerta']}</h2>
+        </div>
+    """, unsafe_allow_html=True)
+
+with col2:
+    st.markdown(f"""
+        <div class="metric-card">
+            <h4>🛡️ Escudos</h4>
+            <h2>{estado['escudos']}</h2>
+        </div>
+    """, unsafe_allow_html=True)
+
+with col3:
+    st.markdown(f"""
+        <div class="metric-card">
+            <h4>⛽ Combustible</h4>
+            <h2>{estado['combustible']}%</h2>
+        </div>
+    """, unsafe_allow_html=True)
+
+with col4:
+    alerta_txt = estado['alerta']
+    st.markdown(f"""
+        <div class="metric-card">
+            <h4>🚨 Alerta</h4>
+            <h2 style="color: {'#ef4444' if alerta_txt != 'Normal' else '#22c55e'};">{alerta_txt}</h2>
+        </div>
+    """, unsafe_allow_html=True)
+
+# Validación cruzada de restricciones (Coherencia en comandos vs telemetría)
+if estado['combustible'] < 50 and estado['alerta'] == "Alerta Roja":
+    st.error("⚠️ **Alerta de Emergencia:** Combustible bajo detectado. Para iniciar despegue debes introducir el comando de nivelación de tanques o asegurar nivel superior al 50%.")
+
+# Visualización estética del cohete
+st.markdown("### 🔭 Previsualización Visual del Cohete")
+st.code("""
+      /\\
+     /  \\       [Estado Wokwi: Sincronizado]
+    |----|      [Motores: En espera]
+    | 🚀 |      [Protocolo de Seguridad: Activo]
+    |____|
+   //    \\\\
+  """, language="text")
+```[cite: 11]
+
+---
+
+### 4. Páginas Secundarias (`pages/Puente de Mando.py` y `pages/Sala de Maquinas.py`)
+Para mantener la sincronización y el tema visual en las páginas adicionales, actualiza el inicio de cada archivo dentro de la carpeta `pages/`:
+
+```python
+# pages/Puente de Mando.py
+import streamlit as st
+from utils.core import inicializar_estado
+from utils.tema import aplicar_estilos_espaciales, render_header_telemetria
+
+st.set_page_config(page_title="Puente de Mando", layout="wide")
+aplicar_estilos_espaciales()
+inicializar_estado()
+render_header_telemetria()
+
+st.title("🕹️ Puente de Mando - Gestión de Compuertas y Escudos")
+estado = st.session_state.estado_sistema
+
+st.write(f"Estado de la compuerta en Wokwi: **{estado['compuerta']}**")
+st.write(f"Estado de los escudos: **{estado['escudos']}**")
+
+if st.button("Alternar Compuerta"):
+    estado['compuerta'] = "Cerrada" if estado['compuerta'] == "Abierta" else "Abierta"
+    st.rerun()
+```[cite: 11]
