@@ -79,15 +79,28 @@ def tema():
     }
 
     /* =====================================================
-       3. PANEL LATERAL
+       3. PANEL LATERAL (AZUL, MÁS ANCHO, CON DESTELLOS)
     ===================================================== */
+
+    @property --ang {
+        syntax: "<angle>";
+        inherits: false;
+        initial-value: 0deg;
+    }
+
+    /* Un poco más ancho (cuando está abierto) */
+    [data-testid="stSidebar"][aria-expanded="true"] {
+        min-width: 320px !important;
+        width: 320px !important;
+    }
 
     [data-testid="stSidebar"] {
         background:
-            radial-gradient(circle at 20% 15%, #182b50 0%, transparent 35%),
-            linear-gradient(180deg, #080e20 0%, #100d27 60%, #160d2b 100%);
-        border-right: 1px solid rgba(0, 234, 255, 0.35);
-        box-shadow: 8px 0 30px rgba(0, 0, 0, 0.35);
+            radial-gradient(circle at 25% 8%, #2f7bff55 0%, transparent 38%),
+            radial-gradient(circle at 80% 70%, #1b5fe033 0%, transparent 45%),
+            linear-gradient(180deg, #0f3d94 0%, #0a2a6e 45%, #071c4d 100%);
+        border-right: 1px solid rgba(110, 190, 255, 0.6);
+        box-shadow: 8px 0 34px rgba(20, 90, 255, 0.28);
         overflow: hidden;
     }
 
@@ -95,71 +108,218 @@ def tema():
         background: transparent;
     }
 
+    /* Capa 1: puntitos que suben despacio y titilan */
+    [data-testid="stSidebar"]::before,
     [data-testid="stSidebar"]::after {
-        content: "✦      ·       ✧          ·       ✦";
+        content: "";
         position: absolute;
-        top: 15%;
-        left: 12%;
-        width: 80%;
-        color: rgba(0, 234, 255, 0.28);
-        font-size: 19px;
-        letter-spacing: 13px;
-        line-height: 4;
+        inset: -40px 0;
         pointer-events: none;
-        animation: flotar 7s ease-in-out infinite;
+        z-index: 0;
     }
 
-    @keyframes flotar {
-        0%, 100% {
-            transform: translateY(0);
-            opacity: 0.35;
-        }
-        50% {
-            transform: translateY(-12px);
-            opacity: 0.8;
-        }
+    [data-testid="stSidebar"]::before {
+        background-image:
+            radial-gradient(1.5px 1.5px at 12% 18%, #fff 98%, transparent),
+            radial-gradient(1px 1px at 70% 12%, #bfe3ff 98%, transparent),
+            radial-gradient(2px 2px at 40% 36%, #fff 98%, transparent),
+            radial-gradient(1px 1px at 85% 48%, #9fd0ff 98%, transparent),
+            radial-gradient(1.5px 1.5px at 22% 62%, #fff 98%, transparent),
+            radial-gradient(1px 1px at 60% 78%, #bfe3ff 98%, transparent),
+            radial-gradient(2px 2px at 90% 90%, #fff 98%, transparent),
+            radial-gradient(1px 1px at 8% 92%, #9fd0ff 98%, transparent);
+        background-size: 260px 300px;
+        animation: lev1 9s ease-in-out infinite;
     }
 
-    [data-testid="stSidebar"] [data-testid="stMarkdown"] {
+    /* Capa 2: destellos más grandes con brillo */
+    [data-testid="stSidebar"]::after {
+        background-image:
+            radial-gradient(3px 3px at 18% 28%, #ffffff 40%, #7cc4ff55 70%, transparent),
+            radial-gradient(3px 3px at 75% 40%, #ffffff 40%, #7cc4ff55 70%, transparent),
+            radial-gradient(2.5px 2.5px at 45% 70%, #ffffff 40%, #7cc4ff55 70%, transparent),
+            radial-gradient(3px 3px at 88% 82%, #ffffff 40%, #7cc4ff55 70%, transparent);
+        background-size: 300px 380px;
+        filter: drop-shadow(0 0 5px #8fd0ff);
+        animation: lev2 6s ease-in-out infinite;
+    }
+
+    @keyframes lev1 {
+        0%, 100% { transform: translateY(0); opacity: 0.45; }
+        50%      { transform: translateY(-26px); opacity: 1; }
+    }
+
+    @keyframes lev2 {
+        0%, 100% { transform: translate(0, 0); opacity: 1; }
+        33%      { transform: translate(8px, -16px); opacity: 0.35; }
+        66%      { transform: translate(-6px, -30px); opacity: 0.9; }
+    }
+
+    /* Destellos en forma de brillo (no son texto) */
+    .destellos {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        filter: drop-shadow(0 0 6px #9fd8ff);
+    }
+
+    .destellos i {
+        position: absolute;
+        width: 14px;
+        height: 14px;
+        background: #ffffff;
+        clip-path: polygon(50% 0, 60% 40%, 100% 50%, 60% 60%, 50% 100%, 40% 60%, 0 50%, 40% 40%);
+        opacity: 0;
+        animation: destello 5s ease-in-out infinite;
+    }
+
+    @keyframes destello {
+        0%, 100% { opacity: 0;   transform: translateY(0) scale(0.4) rotate(0deg); }
+        50%      { opacity: 0.95; transform: translateY(-14px) scale(1.1) rotate(45deg); }
+    }
+
+    [data-testid="stSidebar"] [data-testid="stSidebarContent"] {
         position: relative;
         z-index: 2;
+        display: flex;
+        flex-direction: column;
     }
+
+    /* Orden: cabecera, GUÍA, páginas (todo más pegado arriba) */
+    [data-testid="stSidebarHeader"] {
+        order: 0;
+        height: auto;
+        min-height: 0;
+        padding: 0.7rem 1rem 0.2rem 1rem;
+        margin-bottom: 0;
+    }
+
+    [data-testid="stSidebarUserContent"] {
+        order: 1;
+        padding-top: 0;
+        padding-bottom: 0;
+    }
+
+    [data-testid="stSidebarNav"] { order: 2; }
 
     [data-testid="stSidebar"] p,
-    [data-testid="stSidebar"] label {
-        color: #c8dff5 !important;
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] li {
+        color: #d6e9ff !important;
     }
 
-    /* Navegación multipágina */
+    /* Tarjeta de guía: con scroll propio */
+    .guia {
+        position: relative;
+        margin: 2px 4px 8px 4px;
+        padding: 12px 14px 8px 14px;
+        border: 1px solid rgba(130, 200, 255, 0.55);
+        border-radius: 14px;
+        background: rgba(5, 20, 60, 0.55);
+        backdrop-filter: blur(3px);
+        font-size: 13px;
+        line-height: 1.5;
+        max-height: 40vh;
+        overflow-y: auto;
+        scrollbar-width: thin;
+        scrollbar-color: #5db4ff #0a2a6e;
+    }
+
+    .guia::-webkit-scrollbar { width: 6px; }
+    .guia::-webkit-scrollbar-thumb { background: #5db4ff; border-radius: 6px; }
+    .guia::-webkit-scrollbar-track { background: transparent; }
+
+    .guia-t {
+        font-family: 'Orbitron', sans-serif;
+        font-size: 12px;
+        letter-spacing: 1.5px;
+        color: #8fd8ff;
+        margin: 6px 0 4px 0;
+        text-shadow: 0 0 10px #4aa8ff;
+    }
+
+    .guia p { margin: 0 0 6px 0; }
+    .guia ul, .guia ol { margin: 0 0 8px 0; padding-left: 18px; }
+    .guia li { margin-bottom: 4px; }
+    .guia b { color: #ffffff; }
+
+    /* Navegación: borde brillante que gira al pasar el cursor.
+       Tiene scroll propio y queda pegada a la guía. */
     [data-testid="stSidebarNav"] {
         position: relative;
         z-index: 2;
-        padding-top: 12px;
+        padding: 2px 10px 6px 6px;
+        max-height: 34vh;
+        overflow-y: auto;
+        scrollbar-width: thin;
+        scrollbar-color: #5db4ff transparent;
     }
 
+    [data-testid="stSidebarNav"] ul { padding-top: 0; margin-top: 0; }
+
     [data-testid="stSidebarNav"] a {
-        border: 1px solid transparent;
+        position: relative;
+        border: 1px solid rgba(140, 200, 255, 0.25);
         border-radius: 12px;
-        margin: 7px 5px;
-        padding: 10px 12px;
+        margin: 5px 4px;
+        padding: 9px 12px;
+        background: rgba(10, 40, 110, 0.35);
         transition: all 0.25s ease;
     }
 
+    [data-testid="stSidebarNav"] a::before {
+        content: "";
+        position: absolute;
+        inset: -2px;
+        border-radius: 14px;
+        padding: 2px;
+        background: conic-gradient(
+            from var(--ang),
+            transparent 0%, #00eaff 15%, #ffffff 25%,
+            #ff35d3 40%, transparent 55%
+        );
+        -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor;
+        mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+        mask-composite: exclude;
+        opacity: 0;
+        transition: opacity 0.25s;
+        pointer-events: none;
+    }
+
     [data-testid="stSidebarNav"] a:hover {
-        background: rgba(0, 234, 255, 0.12);
-        border: 1px solid rgba(0, 234, 255, 0.5);
-        box-shadow: 0 0 16px rgba(0, 234, 255, 0.15);
+        background: rgba(0, 234, 255, 0.16);
+        box-shadow: 0 0 20px rgba(0, 234, 255, 0.45),
+                    inset 0 0 14px rgba(0, 234, 255, 0.18);
         transform: translateX(4px);
     }
+
+    [data-testid="stSidebarNav"] a:hover::before {
+        opacity: 1;
+        animation: giro 2.2s linear infinite;
+    }
+
+    @keyframes giro { to { --ang: 360deg; } }
 
     [data-testid="stSidebarNav"] a[aria-current="page"] {
         background: linear-gradient(
             100deg,
-            rgba(0, 234, 255, 0.2),
-            rgba(155, 92, 255, 0.18)
+            rgba(0, 234, 255, 0.25),
+            rgba(155, 92, 255, 0.25)
         );
-        border: 1px solid rgba(0, 234, 255, 0.65);
-        box-shadow: 0 0 18px rgba(0, 234, 255, 0.16);
+        border: 1px solid rgba(0, 234, 255, 0.8);
+        box-shadow: 0 0 18px rgba(0, 234, 255, 0.3);
+    }
+
+    /* =====================================================
+       3b. ENCABEZADO FIJO
+    ===================================================== */
+
+    .st-key-header_fijo {
+        position: sticky;
+        top: 3.2rem;
+        z-index: 999;
+        padding-bottom: 6px;
     }
 
     /* =====================================================
