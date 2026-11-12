@@ -1,6 +1,9 @@
 import streamlit as st
 
-from utils.core import estilos, visual, captura, estado, enviar
+from utils.core import (
+    estilos, visual, captura, estado, enviar,
+    encabezado, guia_lateral, lista_gestos
+)
 from utils.tema import tema
 
 st.set_page_config(
@@ -11,6 +14,8 @@ st.set_page_config(
 
 estilos()
 tema()
+guia_lateral()
+encabezado()
 
 st.markdown("""
 <div style="
@@ -43,12 +48,9 @@ with izquierda:
             "Utiliza la cámara para enviar órdenes a la nave."
         )
 
-        captura("gestos", 480)
+        captura("gest", 480)
 
-        st.caption(
-            "👍 Escudos · 🤘 Despegue · 🖐 Compuerta · "
-            "✊ Motores al 0 % · 1-4 dedos: 25-100 %"
-        )
+        lista_gestos()
 
     with st.expander("🛠️ Modo manual de respaldo"):
         st.markdown("#### Potencia de motores")
@@ -63,15 +65,18 @@ with izquierda:
             on_change=lambda: enviar(motores=st.session_state.mot)
         )
 
-        b1, b2, b3 = st.columns(3)
+        b1, b2, b3, b4 = st.columns(4)
 
-        if b1.button("🛡️ Escudos ON", use_container_width=True):
+        if b1.button("🛡️ Escudos", use_container_width=True):
             enviar(escudos=True)
 
-        if b2.button("🚪 Compuerta", use_container_width=True):
+        if b2.button("🚪 Abrir", use_container_width=True):
             enviar(compuerta=90)
 
-        if b3.button("🚀 Despegar", use_container_width=True):
+        if b3.button("🚪 Cerrar", use_container_width=True):
+            enviar(compuerta=0)
+
+        if b4.button("🚀 Despegar", use_container_width=True):
             enviar(despegue=True)
 
 with derecha:
