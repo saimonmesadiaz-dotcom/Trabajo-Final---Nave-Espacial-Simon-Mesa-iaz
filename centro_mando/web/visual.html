@@ -1,483 +1,284 @@
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-
-<link
-  href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600&display=swap"
-  rel="stylesheet"
->
-
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&display=swap" rel="stylesheet">
 <style>
-body {
-  margin: 0;
-  background: #05070f;
-}
-
-canvas {
-  width: 100%;
-  display: block;
-  border-radius: 14px;
-  border: 1px solid #00f5ff55;
-}
+  body { margin: 0; background: transparent; }
+  canvas { width: 100%; display: block; border-radius: 16px;
+           border: 1px solid #00eaff77; box-shadow: 0 0 26px #00eaff22; }
 </style>
 </head>
-
 <body>
-
 <canvas id="c"></canvas>
-
 <script src="https://cdn.jsdelivr.net/npm/mqtt@5.3.4/dist/mqtt.min.js"></script>
-
 <script>
-
 const P = "__PREFIJO__";
-
+const W = 960, H = 480;
 const cv = document.getElementById("c");
 const g = cv.getContext("2d");
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
+cv.width = W * dpr; cv.height = H * dpr;
+g.scale(dpr, dpr);
 
-cv.width = 900;
-cv.height = 420;
+let T = { temp: 0, combustible: 0, distancia: 0, emergencia: false, escudos: false,
+          meteoritos: false, compuerta: 0, motores: 0, alerta: false,
+          mision: "PLATAFORMA", motivo: "", nivel: "" };
+let conectado = false, ultima = 0, hayDatos = false;
 
-let T = {
-  temp: 0,
-  combustible: 0,
-  distancia: 0,
-  emergencia: false,
-  escudos: false,
-  meteoritos: false,
-  compuerta: 0,
-  motores: 0,
-  alerta: false,
-  mision: "PLATAFORMA",
-  motivo: ""
-};
-
-let conectado = false;
-
-const c = mqtt.connect(
-  "wss://broker.hivemq.com:8884/mqtt",
-  {
-    reconnectPeriod: 2000,
-    connectTimeout: 10000,
-    clientId: "NaveVisual_" + Math.random().toString(16).slice(2)
-  }
-);
-
-c.on("connect", () => {
-
-  conectado = true;
-
-  c.subscribe(P + "/telemetria");
-
+const c = mqtt.connect("wss://broker.hivemq.com:8884/mqtt", {
+  reconnectPeriod: 2000, connectTimeout: 10000,
+  clientId: "NaveVisual_" + Math.random().toString(16).slice(2)
 });
-
-c.on("reconnect", () => {
-  conectado = false;
-});
-
-c.on("close", () => {
-  conectado = false;
-});
-
-c.on("error", err => {
-  console.error("MQTT visual:", err);
-});
-
-c.on("message", (topic, mensaje) => {
-
+c.on("connect", () => { conectado = true; c.subscribe(P + "/telemetria"); });
+c.on("reconnect", () => { conectado = false; });
+c.on("close", () => { conectado = false; });
+c.on("error", e => console.error("MQTT visual:", e));
+c.on("message", (topic, m) => {
   try {
-
-    const d = JSON.parse(
-      new TextDecoder().decode(mensaje)
-    );
-
+    const d = JSON.parse(new TextDecoder().decode(m));
     Object.assign(T, d);
-
-    // Compatibilidad con nombres del ESP32
-    if (d.comb !== undefined) {
-      T.combustible = d.comb;
-    }
-
-    if (d.dist !== undefined) {
-      T.distancia = d.dist;
-    }
-
-    if (d.emerg !== undefined) {
-      T.emergencia = d.emerg;
-    }
-
-    if (d.vuelo !== undefined && d.mision === undefined) {
-      T.mision = d.vuelo ? "EN VUELO" : "PLATAFORMA";
-    }
-
-    if (d.alerta === undefined) {
-      T.alerta = Boolean(
-        d.alertaMan || T.meteoritos || T.emergencia
-      );
-    }
-
-  } catch (e) {
-
-    console.error("Error de telemetría:", e);
-
-  }
-
+    if (d.comb !== undefined) T.combustible = d.comb;
+    if (d.dist !== undefined) T.distancia = d.dist;
+    if (d.emerg !== undefined) T.emergencia = d.emerg;
+    ultima = Date.now(); hayDatos = true;
+  } catch (e) { console.error(e); }
 });
 
+const nivel = () => T.nivel || (T.emergencia ? "EXTREMA" : (T.alerta || T.meteoritos) ? "ROJA" : "NORMAL");
+const wokwiOn = () => hayDatos && Date.now() - ultima < 4000;
 
-// ===================================================
-// ESTRELLAS
-// ===================================================
+// ---------- elementos de fondo ----------
+const stars = [...Array(140)].map(() => ({ x: Math.random()*W, y: Math.random()*H,
+  s: Math.random()*1.8+.4, v: Math.random()*.25+.05, f: Math.random()*6 }));
+let meteoros = [], humo = [], fr = 0, ry = 0, hatch = 0, escPulso = 0;
 
-const stars = [...Array(120)].map(() => ({
-  x: Math.random() * 900,
-  y: Math.random() * 420,
-  s: Math.random() * 2 + 0.5
-}));
-
-let meteoritos = [];
-let ry = 0;
-let fr = 0;
-
-
-// ===================================================
-// BOTÓN DE ALERTA MANUAL
-// ===================================================
-
+// ---------- botón de alerta (se conserva) ----------
+const BTN = { x: 790, y: 424, w: 150, h: 38 };
 cv.onclick = e => {
-
   const r = cv.getBoundingClientRect();
-
-  const x = (e.clientX - r.left) * 900 / r.width;
-  const y = (e.clientY - r.top) * 420 / r.height;
-
-  if (
-    x > 700 &&
-    x < 880 &&
-    y > 350 &&
-    y < 400
-  ) {
-
-    if (conectado) {
-
-      c.publish(
-        P + "/comandos",
-        JSON.stringify({
-          alerta: !Boolean(T.alerta)
-        }),
-        { qos: 1 }
-      );
-
-    }
-
-  }
-
+  const x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height;
+  if (x > BTN.x && x < BTN.x + BTN.w && y > BTN.y && y < BTN.y + BTN.h && conectado)
+    c.publish(P + "/comandos", JSON.stringify({ alerta: !Boolean(T.alerta) }), { qos: 1 });
 };
 
-
-// ===================================================
-// DIBUJO DE LA NAVE
-// ===================================================
-
-function dibujarNave(x, y) {
-
-  // Propulsor
-  if (Number(T.motores) > 0) {
-
-    g.fillStyle = "#ff8a00";
-
-    g.beginPath();
-
-    g.moveTo(x - 12, y + 40);
-    g.lineTo(x + 12, y + 40);
-
-    g.lineTo(
-      x,
-      y + 40 + Number(T.motores) * 0.5 + Math.random() * 10
-    );
-
-    g.fill();
-
-  }
-
-  // Cuerpo
-  g.fillStyle = "#dfe9ff";
-
-  g.fillRect(x - 18, y - 30, 36, 70);
-
-  g.beginPath();
-
-  g.moveTo(x - 18, y - 30);
-  g.lineTo(x, y - 70);
-  g.lineTo(x + 18, y - 30);
-
-  g.fill();
-
-  // Alas
-  g.fillStyle = "#ff2bd6";
-
-  g.fillRect(x - 30, y + 20, 14, 24);
-  g.fillRect(x + 16, y + 20, 14, 24);
-
-  // Ventana
-  g.fillStyle = Number(T.compuerta) > 0
-    ? "#000"
-    : "#00f5ff";
-
-  g.fillRect(x - 8, y - 5, 16, 26);
-
+function rr(x, y, w, h, r) {
+  g.beginPath(); g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
 }
 
-
-// ===================================================
-// ESCUDOS
-// ===================================================
-
-function dibujarEscudos(x, y) {
-
-  if (!T.escudos) return;
-
-  g.save();
-
-  g.shadowColor = "#00f5ff";
-  g.shadowBlur = 30;
-
-  g.strokeStyle = "#00f5ff";
-  g.lineWidth = 6;
-
-  g.strokeRect(4, 4, 892, 412);
-
-  g.lineWidth = 3;
-
-  g.beginPath();
-
-  g.ellipse(x, y, 90, 110, 0, 0, Math.PI * 2);
-
-  g.stroke();
-
-  g.restore();
-
-}
-
-
-// ===================================================
-// METEORITOS
-// ===================================================
-
-function dibujarMeteoritos() {
-
-  if (T.meteoritos) {
-
-    if (fr % 12 === 0) {
-
-      const x = Math.random() * 900;
-
-      meteoritos.push({
-        x,
-        y: -20,
-        vx: (450 - x) / 90,
-        vy: 340 / 90
-      });
-
-    }
-
-  } else {
-
-    meteoritos = [];
-
-  }
-
-  meteoritos = meteoritos.filter(
-    m => m.y < 330
-  );
-
-  meteoritos.forEach(m => {
-
-    m.x += m.vx;
-    m.y += m.vy;
-
-    g.strokeStyle = "#ff8a00";
-    g.lineWidth = 4;
-
-    g.beginPath();
-
-    g.moveTo(m.x, m.y);
-
-    g.lineTo(
-      m.x - m.vx * 6,
-      m.y - m.vy * 6
-    );
-
-    g.stroke();
-
-    g.fillStyle = "#ffb347";
-
-    g.beginPath();
-
-    g.arc(m.x, m.y, 9, 0, Math.PI * 2);
-
-    g.fill();
-
+function fondo() {
+  const bg = g.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, "#050a22"); bg.addColorStop(.6, "#0b1240"); bg.addColorStop(1, "#1a0f3d");
+  g.fillStyle = bg; g.fillRect(0, 0, W, H);
+  let n = g.createRadialGradient(220, 120, 10, 220, 120, 260);
+  n.addColorStop(0, "rgba(70,120,255,.22)"); n.addColorStop(1, "transparent");
+  g.fillStyle = n; g.fillRect(0, 0, W, H);
+  n = g.createRadialGradient(760, 300, 10, 760, 300, 280);
+  n.addColorStop(0, "rgba(255,53,211,.16)"); n.addColorStop(1, "transparent");
+  g.fillStyle = n; g.fillRect(0, 0, W, H);
+  const rapido = T.mision === "EN VUELO" ? 6 : 1;
+  stars.forEach(s => {
+    s.y += s.v * rapido; if (s.y > H) { s.y = 0; s.x = Math.random() * W; }
+    g.fillStyle = `rgba(255,255,255,${.3 + .7 * Math.abs(Math.sin(fr / 35 + s.f))})`;
+    g.fillRect(s.x, s.y, s.s, s.s * (rapido > 1 ? 4 : 1));
   });
-
+  // planeta
+  const pl = g.createRadialGradient(840, 90, 5, 850, 100, 70);
+  pl.addColorStop(0, "#6fb6ff"); pl.addColorStop(.6, "#2a56c8"); pl.addColorStop(1, "#0c1a5a");
+  g.fillStyle = pl; g.beginPath(); g.arc(850, 100, 52, 0, 7); g.fill();
+  g.strokeStyle = "rgba(190,220,255,.45)"; g.lineWidth = 3;
+  g.beginPath(); g.ellipse(850, 100, 82, 14, -.35, 0, 7); g.stroke();
 }
 
+function plataforma() {
+  const y = 392;
+  g.fillStyle = "#101a46"; g.fillRect(0, y, W, H - y);
+  const l = g.createLinearGradient(0, y, 0, y + 6);
+  l.addColorStop(0, "#00eaff"); l.addColorStop(1, "#0a2a6e");
+  g.fillStyle = l; g.fillRect(0, y, W, 5);
+  g.fillStyle = "#16245c"; rr(380, y - 12, 200, 14, 5); g.fill();
+  g.strokeStyle = "#00eaff55"; g.lineWidth = 1; g.strokeRect(380, y - 12, 200, 14);
+}
 
-// ===================================================
-// INFORMACIÓN
-// ===================================================
+function meteoritos() {
+  if (T.meteoritos) {
+    if (fr % 14 === 0) { const x = Math.random() * W;
+      meteoros.push({ x, y: -20, vx: (480 - x) / 80, vy: 4.2, r: 6 + Math.random() * 7 }); }
+  } else meteoros = [];
+  meteoros = meteoros.filter(m => m.y < 380);
+  meteoros.forEach(m => {
+    m.x += m.vx; m.y += m.vy;
+    const t = g.createLinearGradient(m.x, m.y, m.x - m.vx * 9, m.y - m.vy * 9);
+    t.addColorStop(0, "rgba(255,160,40,.9)"); t.addColorStop(1, "transparent");
+    g.strokeStyle = t; g.lineWidth = m.r; g.lineCap = "round";
+    g.beginPath(); g.moveTo(m.x, m.y); g.lineTo(m.x - m.vx * 9, m.y - m.vy * 9); g.stroke();
+    g.fillStyle = "#ffb347"; g.shadowColor = "#ff8a00"; g.shadowBlur = 14;
+    g.beginPath(); g.arc(m.x, m.y, m.r, 0, 7); g.fill(); g.shadowBlur = 0;
+  });
+}
 
-function escribirInformacion() {
+function llama(x, y) {
+  const m = Number(T.motores) || 0;
+  if (m <= 0) return;
+  const len = 25 + m * .9 + Math.random() * 14;
+  const f = g.createLinearGradient(x, y, x, y + len);
+  f.addColorStop(0, "#ffffff"); f.addColorStop(.25, "#ffe36b");
+  f.addColorStop(.6, "#ff7a1a"); f.addColorStop(1, "rgba(255,40,40,0)");
+  g.fillStyle = f; g.beginPath();
+  g.moveTo(x - 15, y); g.quadraticCurveTo(x - 6, y + len * .6, x, y + len);
+  g.quadraticCurveTo(x + 6, y + len * .6, x + 15, y); g.fill();
+  if (fr % 3 === 0) humo.push({ x: x + (Math.random() - .5) * 14, y: y + 10, r: 5, a: .5 });
+}
 
-  g.font = "16px Orbitron, monospace";
+function dibujarHumo() {
+  humo = humo.filter(h => h.a > .02);
+  humo.forEach(h => { h.y += 2.2; h.r += .6; h.a *= .94;
+    g.fillStyle = `rgba(200,215,255,${h.a})`; g.beginPath(); g.arc(h.x, h.y, h.r, 0, 7); g.fill(); });
+}
 
+function cohete(x, y) {
+  const sacude = (T.motores > 0 && T.mision === "EN VUELO") ? (Math.random() - .5) * 2 : 0;
+  g.save(); g.translate(x + sacude, y);
+  // aletas
+  g.fillStyle = "#e8346f";
+  [-1, 1].forEach(sd => { g.beginPath(); g.moveTo(sd * 24, 20); g.lineTo(sd * 58, 68);
+    g.lineTo(sd * 58, 84); g.lineTo(sd * 24, 64); g.closePath(); g.fill(); });
+  g.fillStyle = "#b01650"; g.beginPath(); g.moveTo(-8, 40); g.lineTo(0, 92); g.lineTo(8, 40); g.fill();
+  // cuerpo
+  const b = g.createLinearGradient(-26, 0, 26, 0);
+  b.addColorStop(0, "#9fb4e6"); b.addColorStop(.35, "#ffffff"); b.addColorStop(1, "#8196c9");
+  g.fillStyle = b; g.beginPath(); g.moveTo(0, -105);
+  g.bezierCurveTo(34, -70, 28, -20, 26, 70); g.lineTo(-26, 70);
+  g.bezierCurveTo(-28, -20, -34, -70, 0, -105); g.fill();
+  // punta
+  g.fillStyle = "#e8346f"; g.beginPath(); g.moveTo(0, -105);
+  g.bezierCurveTo(20, -88, 25, -75, 27, -62); g.lineTo(-27, -62);
+  g.bezierCurveTo(-25, -75, -20, -88, 0, -105); g.fill();
+  // franjas
+  g.fillStyle = "#3a5bd9"; g.fillRect(-26, 48, 52, 8);
+  // ventana
+  g.fillStyle = "#1a2a66"; g.beginPath(); g.arc(0, -30, 15, 0, 7); g.fill();
+  const v = g.createRadialGradient(-5, -36, 2, 0, -30, 13);
+  v.addColorStop(0, "#d8fbff"); v.addColorStop(1, "#14a3d9");
+  g.fillStyle = v; g.beginPath(); g.arc(0, -30, 11.5, 0, 7); g.fill();
+  // compuerta (animada)
+  const objetivo = Number(T.compuerta) > 0 ? 1 : 0;
+  hatch += (objetivo - hatch) * .12;
+  const hx = 6, hy = 6, hw = 18, hh = 30;
+  g.fillStyle = "#0a1030"; rr(hx - 12, hy, hw + 6, hh, 4); g.fill();
+  if (hatch > .05) { g.fillStyle = "#ffd400"; g.globalAlpha = .35 * hatch;
+    rr(hx - 12, hy, hw + 6, hh, 4); g.fill(); g.globalAlpha = 1; }
+  g.fillStyle = "#c9d6f5"; g.save();
+  g.translate(hx + 12, hy); g.transform(1 - hatch * .85, 0, 0, 1, 0, 0);
+  rr(-hw - 6, 0, hw + 6, hh, 4); g.fill(); g.restore();
+  g.restore();
+}
+
+function escudo(x, y) {
+  escPulso += .06;
+  const a = T.escudos ? 1 : 0;
+  if (!a) return;
+  const r = 128 + Math.sin(escPulso) * 4;
+  g.save();
+  const f = g.createRadialGradient(x, y - 5, r * .5, x, y - 5, r);
+  f.addColorStop(0, "rgba(0,234,255,0)"); f.addColorStop(1, "rgba(0,234,255,.28)");
+  g.fillStyle = f; g.beginPath(); g.ellipse(x, y - 5, r * .78, r, 0, 0, 7); g.fill();
+  g.shadowColor = "#00eaff"; g.shadowBlur = 24;
+  g.strokeStyle = "rgba(120,245,255,.95)"; g.lineWidth = 3;
+  g.beginPath(); g.ellipse(x, y - 5, r * .78, r, 0, 0, 7); g.stroke();
+  g.restore();
+}
+
+// ---------- paneles HUD ----------
+function panel(x, y, w, h, color) {
+  g.fillStyle = "rgba(8,16,48,.78)"; rr(x, y, w, h, 12); g.fill();
+  g.strokeStyle = color; g.lineWidth = 1.4; rr(x, y, w, h, 12); g.stroke();
+}
+function barra(x, y, w, v, max, col) {
+  g.fillStyle = "#0a1330"; rr(x, y, w, 7, 4); g.fill();
+  const k = Math.max(0, Math.min(1, v / max));
+  g.fillStyle = col; if (k > 0) { rr(x, y, w * k, 7, 4); g.fill(); }
+}
+function dato(x, y, etiqueta, valor, col, v, max) {
+  g.textAlign = "left"; g.font = "10px Orbitron, monospace"; g.fillStyle = "#8fb0cf";
+  g.fillText(etiqueta, x, y);
+  g.font = "700 15px Orbitron, monospace"; g.fillStyle = col; g.fillText(valor, x, y + 19);
+  if (max) barra(x, y + 26, 150, v, max, col);
+}
+
+function hud() {
+  const temp = Number(T.temp) || 0, comb = Number(T.combustible) || 0;
+  panel(14, 14, 180, 186, "#00eaff66");
+  dato(28, 36, "REACTOR", temp.toFixed(1) + " °C", temp > 30 ? "#ff4d6a" : "#00eaff", temp, 60);
+  dato(28, 90, "COMBUSTIBLE", comb.toFixed(0) + " %", comb < 30 ? "#ffd400" : "#2dffa0", comb, 100);
+  dato(28, 144, "RADAR", (Number(T.distancia) || 0).toFixed(0) + " cm", "#00eaff", Number(T.distancia) || 0, 400);
+
+  // derecha: estados
+  const abierta = Number(T.compuerta) > 0, nv = nivel();
+  panel(W - 214, 14, 200, 186, "#9b5cff77");
   g.textAlign = "left";
+  const filas = [
+    ["MISIÓN", String(T.mision), T.mision === "EN VUELO" ? "#2dffa0" : T.mision === "ABORTADO" ? "#ff4d6a" : "#00eaff"],
+    ["ESCUDOS", T.escudos ? "ACTIVOS" : "INACTIVOS", T.escudos ? "#2dffa0" : "#8fa4bd"],
+    ["COMPUERTA", abierta ? "ABIERTA" : "CERRADA", abierta ? "#ffd400" : "#2dffa0"],
+    ["ALERTA", nv === "NORMAL" ? "NORMAL" : nv === "ROJA" ? "ROJA" : "ROJA EXTREMA", nv === "NORMAL" ? "#2dffa0" : "#ff4d6a"],
+    ["MOTORES", (Number(T.motores) || 0).toFixed(0) + " %", "#00eaff"]
+  ];
+  filas.forEach((f, i) => { const y = 36 + i * 33;
+    g.font = "10px Orbitron, monospace"; g.fillStyle = "#8fb0cf"; g.fillText(f[0], W - 198, y);
+    g.font = "700 14px Orbitron, monospace"; g.fillStyle = f[2]; g.fillText(f[1], W - 198, y + 17); });
+}
 
-  g.fillStyle = Number(T.temp) > 30
-    ? "#ff3b3b"
-    : "#00f5ff";
+function avisoCentral() {
+  const texto = T.motivo ? String(T.motivo) : (T.meteoritos ? "METEORITOS: ACTIVA LOS ESCUDOS" : "");
+  if (!texto) return;
+  const crit = T.motivo || T.meteoritos;
+  const w = 380, x = (W - w) / 2, y = 18;
+  const blink = Math.floor(fr / 20) % 2 === 0;
+  g.fillStyle = blink ? "rgba(120,10,30,.92)" : "rgba(70,8,22,.92)"; rr(x, y, w, 40, 10); g.fill();
+  g.strokeStyle = "#ff4d6a"; g.lineWidth = 1.6; rr(x, y, w, 40, 10); g.stroke();
+  g.textAlign = "center"; g.fillStyle = "#fff"; g.font = "700 13px Orbitron, monospace";
+  g.fillText("⚠ " + texto.toUpperCase(), W / 2, y + 25); g.textAlign = "left";
+}
 
-  g.fillText(
-    "REACTOR " + Number(T.temp || 0).toFixed(1) + " C",
-    20,
-    30
-  );
+function estadoConexion() {
+  const ok = wokwiOn();
+  g.textAlign = "left"; g.font = "10px Orbitron, monospace";
+  g.fillStyle = conectado ? "#2dffa0" : "#ff4d6a";
+  g.fillText(conectado ? "● MQTT ONLINE" : "● MQTT OFFLINE", 18, 432);
+  g.fillStyle = ok ? "#2dffa0" : (hayDatos ? "#ff4d6a" : "#ffd400");
+  g.fillText(ok ? "● WOKWI EN LÍNEA" : hayDatos ? "● WOKWI SIN SEÑAL" : "● ESPERANDO A WOKWI", 18, 452);
+}
 
-  g.fillStyle = Number(T.combustible) < 30
-    ? "#ffd400"
-    : "#00f5ff";
-
-  g.fillText(
-    "COMBUSTIBLE " + (T.combustible ?? 0) + "%",
-    20,
-    56
-  );
-
-  g.fillStyle = "#00f5ff";
-
-  g.fillText(
-    "RADAR " + (T.distancia ?? 0) + " cm",
-    20,
-    82
-  );
-
-  g.textAlign = "right";
-
-  g.fillStyle = "#ff2bd6";
-
-  g.fillText(
-    "MISION: " + T.mision,
-    880,
-    30
-  );
-
-  if (T.motivo) {
-
-    g.fillStyle = "#ffd400";
-
-    g.fillText(
-      String(T.motivo),
-      880,
-      56
-    );
-
-  }
-
+function botonAlerta() {
+  const nv = nivel(), act = nv !== "NORMAL";
+  const col = !act ? "#2a0f1c" : (Math.floor(fr / 15) % 2 ? "#ff1f3d" : "#a30f26");
+  g.fillStyle = col; rr(BTN.x, BTN.y, BTN.w, BTN.h, 10); g.fill();
+  g.strokeStyle = "#ff4d6a"; g.lineWidth = 1.4; rr(BTN.x, BTN.y, BTN.w, BTN.h, 10); g.stroke();
+  g.fillStyle = "#fff"; g.font = "700 12px Orbitron, monospace"; g.textAlign = "center";
+  g.fillText(!act ? "ALERTA: NORMAL" : nv === "EXTREMA" ? "ROJA EXTREMA" : "ALERTA ROJA", BTN.x + BTN.w / 2, BTN.y + 24);
   g.textAlign = "left";
-
 }
 
-
-// ===================================================
-// INDICADOR DE ALERTA
-// ===================================================
-
-function dibujarAlerta() {
-
-  const activa = Boolean(T.alerta);
-
-  g.fillStyle = (
-    activa && Math.floor(fr / 15) % 2 === 0
-  )
-    ? "#ff1f3d"
-    : "#3a0a14";
-
-  g.fillRect(700, 350, 180, 50);
-
-  g.fillStyle = "#fff";
-
-  g.font = "16px Orbitron, monospace";
-
-  g.fillText(
-    activa ? "ALERTA ACTIVA" : "ALERTA",
-    715,
-    382
-  );
-
+function bordeAlerta() {
+  const nv = nivel(); if (nv === "NORMAL") return;
+  const p = nv === "EXTREMA" ? .55 : .3;
+  const a = p * (.5 + .5 * Math.abs(Math.sin(fr / (nv === "EXTREMA" ? 6 : 14))));
+  g.strokeStyle = `rgba(255,40,70,${a})`; g.lineWidth = 10; g.strokeRect(5, 5, W - 10, H - 10);
 }
-
-
-// ===================================================
-// ANIMACIÓN PRINCIPAL
-// ===================================================
 
 function loop() {
-
   fr++;
-
-  g.fillStyle = "#05070f";
-
-  g.fillRect(0, 0, 900, 420);
-
-  // Estrellas
-  stars.forEach(s => {
-
-    g.fillStyle =
-      `rgba(255,255,255,${0.3 + 0.7 * Math.abs(Math.sin(fr / 40 + s.x))})`;
-
-    g.fillRect(s.x, s.y, s.s, s.s);
-
-  });
-
-  // Meteoritos
-  dibujarMeteoritos();
-
-  // Movimiento de nave
-  ry = T.mision === "EN VUELO"
-    ? Math.min(ry + 3, 250)
-    : Math.max(ry - 6, 0);
-
-  const x = 450;
-  const y = 330 - ry;
-
-  dibujarNave(x, y);
-
-  dibujarEscudos(x, y);
-
-  escribirInformacion();
-
-  dibujarAlerta();
-
-  // Estado MQTT
-  g.fillStyle = conectado ? "#00ff88" : "#ff3b3b";
-
-  g.font = "12px Orbitron, monospace";
-
-  g.fillText(
-    conectado ? "MQTT ONLINE" : "MQTT OFFLINE",
-    20,
-    400
-  );
-
+  fondo(); plataforma(); meteoritos();
+  ry = T.mision === "EN VUELO" ? Math.min(ry + 3, 215) : Math.max(ry - 6, 0);
+  const x = W / 2, y = 290 - ry;
+  llama(x, y + 70); dibujarHumo(); cohete(x, y); escudo(x, y);
+  hud(); avisoCentral(); botonAlerta(); estadoConexion(); bordeAlerta();
   requestAnimationFrame(loop);
-
 }
-
 loop();
-
 </script>
-
 </body>
 </html>
