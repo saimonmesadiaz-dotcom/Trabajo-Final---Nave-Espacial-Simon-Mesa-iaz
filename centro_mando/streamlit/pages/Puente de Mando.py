@@ -1,6 +1,9 @@
 import streamlit as st
 
-from utils.core import estilos, visual, captura, estado, ejecutar
+from utils.core import (
+    estilos, visual, captura, estado, ejecutar,
+    encabezado, guia_lateral, lista_comandos_voz
+)
 from utils.tema import tema
 
 st.set_page_config(
@@ -11,6 +14,8 @@ st.set_page_config(
 
 estilos()
 tema()
+guia_lateral()
+encabezado()
 
 st.markdown("""
 <div style="
@@ -46,11 +51,11 @@ with izquierda:
         captura("voz", 160)
 
         st.divider()
+        st.markdown("#### 💬 ¿Qué puedo decir?")
+        lista_comandos_voz()
+
         st.markdown("#### ⌨️ Control manual por texto")
-        st.caption(
-            "Ejemplos: activar escudos, abrir compuerta, "
-            "cerrar compuerta, alerta roja, iniciar despegue o abortar misión."
-        )
+        st.caption("Escribe cualquiera de las órdenes anteriores y pulsa Enter.")
 
         def enviar_texto():
             ejecutar(st.session_state.txt)
