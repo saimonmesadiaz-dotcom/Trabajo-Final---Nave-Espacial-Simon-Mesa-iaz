@@ -178,12 +178,35 @@ def tema():
         50%      { opacity: 0.95; transform: translateY(-14px) scale(1.1) rotate(45deg); }
     }
 
+    [data-testid="stSidebar"] > div:first-child {
+        height: 100%;
+    }
+
+    /* Esta es la zona que hace scroll en la barra lateral */
     [data-testid="stSidebar"] [data-testid="stSidebarContent"] {
         position: relative;
         z-index: 2;
         display: flex;
         flex-direction: column;
+        height: 100% !important;
+        max-height: 100vh;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
+        scrollbar-width: thin;
+        scrollbar-color: #5db4ff transparent;
     }
+
+    /* Que nada se encoja: así el contenido desborda y se puede hacer scroll */
+    [data-testid="stSidebarContent"] > * {
+        flex-shrink: 0 !important;
+    }
+
+    [data-testid="stSidebarContent"]::-webkit-scrollbar { width: 6px; }
+    [data-testid="stSidebarContent"]::-webkit-scrollbar-thumb {
+        background: #5db4ff;
+        border-radius: 6px;
+    }
+    [data-testid="stSidebarContent"]::-webkit-scrollbar-track { background: transparent; }
 
     /* Orden: cabecera, GUÍA, páginas (todo más pegado arriba) */
     [data-testid="stSidebarHeader"] {
