@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="es">
 
@@ -182,7 +181,7 @@ if (MODO === "voz") {
 
   document.getElementById("voz").style.display = "block";
 
-} else if (MODO === "gest") {
+} else if (MODO === "gest" || MODO === "gestos") {
 
   document.getElementById("gest").style.display = "block";
 
@@ -319,7 +318,7 @@ if (MODO === "voz") {
 // RECONOCIMIENTO DE GESTOS
 // ===================================================
 
-if (MODO === "gest") {
+if (MODO === "gest" || MODO === "gestos") {
 
   const video = document.getElementById("v");
 
