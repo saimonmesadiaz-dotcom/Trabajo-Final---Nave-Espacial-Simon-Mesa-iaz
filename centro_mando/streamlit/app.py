@@ -1,6 +1,9 @@
 import streamlit as st
 
-from utils.core import estilos, visual, nucleo
+from utils.core import (
+    estilos, visual, nucleo, encabezado, guia_lateral,
+    lista_comandos_voz, lista_gestos
+)
 from utils.tema import tema
 
 st.set_page_config(
@@ -13,6 +16,8 @@ st.set_page_config(
 estilos()
 tema()
 nucleo()
+guia_lateral()
+encabezado()
 
 st.markdown("""
 <div style="
@@ -54,10 +59,22 @@ st.markdown("### ✦ ESTADO DE LA MISIÓN")
 
 st.write(
     "Administra los sistemas de la nave desde el menú lateral. "
-    "Utiliza el **Puente de Mando** para las órdenes por voz y la "
-    "**Sala de Máquinas** para los controles por gestos y el modo manual."
+    "Usa el **Puente de Mando** para las órdenes por voz y la "
+    "**Sala de Máquinas** para los gestos y el modo manual. "
+    "El encabezado fijo te dice si hay conexión con Wokwi y te avisa "
+    "cuando una orden no se puede cumplir."
 )
+
+visual()
 
 st.divider()
 
-visual()
+c1, c2 = st.columns(2, gap="large")
+
+with c1:
+    st.markdown("### 🎙️ Comandos de voz")
+    lista_comandos_voz()
+
+with c2:
+    st.markdown("### 🖐️ Gestos")
+    lista_gestos()
