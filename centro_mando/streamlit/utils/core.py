@@ -557,7 +557,7 @@ def visual():
 
     html_ = archivo.read_text(encoding="utf-8").replace("__PREFIJO__", P)
 
-    components.html(html_, height=500, scrolling=False)
+    components.html(html_, height=560, scrolling=False)
 
 
 # =====================================================
