@@ -725,28 +725,37 @@ def encabezado():
 def guia_lateral():
     with st.sidebar:
         html("""
-<div class='guia'>
-<div class='chispas'>
-<span style='left:8%;top:10px;animation-delay:0s'>✦</span>
-<span style='left:30%;top:34px;animation-delay:1.2s'>✧</span>
-<span style='left:55%;top:6px;animation-delay:2.1s'>✦</span>
-<span style='left:78%;top:30px;animation-delay:.6s'>✧</span>
-<span style='left:92%;top:8px;animation-delay:1.8s'>✦</span>
+<div class='destellos'>
+<i style='left:12%;top:60px;animation-delay:0s'></i>
+<i style='left:80%;top:140px;animation-delay:1.1s'></i>
+<i style='left:30%;top:260px;animation-delay:2.3s'></i>
+<i style='left:68%;top:340px;animation-delay:.6s'></i>
+<i style='left:15%;top:430px;animation-delay:3.1s'></i>
+<i style='left:88%;top:500px;animation-delay:1.8s'></i>
+<i style='left:45%;top:600px;animation-delay:2.7s'></i>
 </div>
-<div class='guia-t'>🛰️ CÓMO USAR LA NAVE</div>
+<div class='guia'>
+<div class='guia-t'>🛰️ BIENVENIDO, CAPITÁN</div>
+<p>Esta interfaz te permite controlar una nave simulada en Wokwi (ESP32) usando tu <b>voz</b> o tus <b>gestos</b>.</p>
+<div class='guia-t'>CÓMO LEER LA PANTALLA</div>
+<ul>
+<li><b>Encabezado superior:</b> muestra si hay conexión con HiveMQ y con Wokwi, el nivel de alerta y los avisos. Si una orden no se puede cumplir, ahí te explica por qué.</li>
+<li><b>Tablero de la nave:</b> el cohete y la telemetría real: reactor, combustible, radar, escudos y compuerta.</li>
+<li><b>Estado de la nave:</b> confirma cada orden y guarda la bitácora.</li>
+</ul>
+<div class='guia-t'>DÓNDE DAR ÓRDENES</div>
+<ul>
+<li><b>Puente de Mando:</b> órdenes por voz o por texto.</li>
+<li><b>Sala de Máquinas:</b> gestos con la cámara y controles manuales.</li>
+</ul>
+<div class='guia-t'>PARA DESPEGAR</div>
 <ol>
-<li><b>Mira el encabezado</b>: indica si hay conexión con HiveMQ y con Wokwi, y avisa si una orden no se puede cumplir.</li>
-<li><b>Puente de Mando</b>: da órdenes por voz o texto.</li>
-<li><b>Sala de Máquinas</b>: controla con gestos de la mano.</li>
-<li>El tablero muestra la nave y la telemetría real del ESP32.</li>
+<li>Activa los escudos.</li>
+<li>Cierra la compuerta.</li>
+<li>Comprueba que el combustible sea de al menos 30 %.</li>
+<li>Di «iniciar despegue».</li>
 </ol>
-<div class='guia-t'>🚀 PARA DESPEGAR</div>
-<ol>
-<li>"activar escudos"</li>
-<li>"cerrar compuerta"</li>
-<li>Combustible ≥ 30 %</li>
-<li>"iniciar despegue"</li>
-</ol>
+<p>Si algo falla, el encabezado te dirá el motivo y qué comando usar.</p>
 </div>
 """)
 
